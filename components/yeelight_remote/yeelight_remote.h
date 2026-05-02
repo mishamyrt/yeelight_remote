@@ -20,21 +20,20 @@ namespace yeelight_remote {
         Trigger<> *get_press_right_trigger() const { return press_right_trigger_; }
 
     protected:
-        uint8_t parity = 0;
-		uint8_t previousMessageId = 0;
-        uint8_t inMessageCount = 0;
-		uint8_t command = 0;
-		bool inMessage = false;
+        uint8_t parity_ = 0;
+		uint8_t previous_message_id_ = 0;
+        uint8_t message_size_ = 0;
+		uint8_t command_ = 0;
+		bool is_in_message_ = false;
 
-        void handle_char_(uint8_t readByte);
-		void handlePress();
-		void handleLongPress();
-		void handleTwistLeft();
-		void handleTwistRight();
-		void handlePressAndTwistLeft();
-		void handlePressAndTwistRight();
-		
-		
+        void handle_char_(uint8_t read_byte);
+		void handle_press_();
+		void handle_long_press_();
+		void handle_rotate_left_();
+		void handle_rotate_right_();
+		void handle_press_and_rotate_left_();
+		void handle_press_and_rotate_right_();
+
 		Trigger<> *press_trigger_ = new Trigger<>();
 		Trigger<> *long_press_trigger_ = new Trigger<>();
 		Trigger<> *left_trigger_ = new Trigger<>();
