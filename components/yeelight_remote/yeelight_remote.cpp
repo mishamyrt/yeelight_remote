@@ -1,4 +1,7 @@
 #include "yeelight_remote.h"
+
+#include <cstdint>
+
 #include "esphome/core/log.h"
 
 namespace esphome {
@@ -6,149 +9,122 @@ namespace yeelight_remote {
 
 static const char *TAG = "yeelight-remote";
 
-static const uint8_t REMOTE_COMMAND_PRESS = 0x01;
-static const uint8_t REMOTE_COMMAND_PRESS_AND_ROTATE_RIGHT = 0x02;
-static const uint8_t REMOTE_COMMAND_PRESS_AND_ROTATE_LEFT = 0x03;
-static const uint8_t REMOTE_COMMAND_ROTATE_RIGHT = 0x04;
-static const uint8_t REMOTE_COMMAND_ROTATE_LEFT = 0x05;
-static const uint8_t REMOTE_COMMAND_LONG_PRESS = 0x06;
-
 static const uint8_t REMOTE_MESSAGE_START = 0x5A;
-static const uint8_t REMOTE_POSITION_COMMAND = 3;
-static const uint8_t REMOTE_POSITION_PARITY = 7;
 static const uint32_t DOUBLE_PRESS_TIMEOUT_MS = 300;
 
-
-void YeelightRemote::dump_config() {
-    ESP_LOGCONFIG(TAG, "");
-}
+void YeelightRemote::dump_config() { ESP_LOGCONFIG(TAG, ""); }
 
 void YeelightRemote::loop() {
-    while (this->available()) {
-        uint8_t read_byte = this->read();
-        this->handle_char_(read_byte);
-    }
-    this->handle_pending_press_();
+  while (this->available()) {
+    uint8_t read_byte = this->read();
+    this->handle_byte_(read_byte);
+  }
+  this->handle_pending_press_();
 }
 
-void YeelightRemote::handle_char_(uint8_t read_byte) {
-    if (read_byte == REMOTE_MESSAGE_START && !this->is_in_message_) {
-        ESP_LOGD(TAG, "Got message start");
-        this->is_in_message_ = true;
-        this->message_size_ = 0;
-        this->parity_ = 0;
-    }
-    if (!this->is_in_message_) {
-        return;
-    }
+void YeelightRemote::handle_byte_(uint8_t incoming_byte) {
+  if (incoming_byte == REMOTE_MESSAGE_START && !this->is_reading_message_) {
+    ESP_LOGD(TAG, "Got message start");
+    this->is_reading_message_ = true;
+    this->message_size_ = 0;
+    this->message_parity_ = 0;
+  }
+  if (!this->is_reading_message_) {
+    return;
+  }
 
-    if (this->message_size_ == 1) {
-        ESP_LOGD(TAG, "Found message id: %d", read_byte);
-        if (this->previous_message_id_ == read_byte) {
-            ESP_LOGD(TAG, "This is the same as the previous message, so skipping this");
-            this->is_in_message_ = false;
-        }
-        this->previous_message_id_ = read_byte;
-    } else if (this->message_size_ == REMOTE_POSITION_COMMAND) {
-        ESP_LOGD(TAG, "Found command: %d", read_byte);
-        this->command_ = read_byte;
-    } else if (this->message_size_ == REMOTE_POSITION_PARITY) {
-        ESP_LOGD(TAG, "Parity got of: %d", read_byte);
-        ESP_LOGD(TAG, "Calculated parity of: %d", this->parity_ % 255);
-        if (this->parity_ % 255 == read_byte) {
-            switch (this->command_) {
-                case REMOTE_COMMAND_PRESS:
-                    this->handle_press_();
-                    break;
-                case REMOTE_COMMAND_PRESS_AND_ROTATE_RIGHT:
-                    this->fire_press_and_rotate_right_();
-                    break;
-                case REMOTE_COMMAND_PRESS_AND_ROTATE_LEFT:
-                    this->fire_press_and_rotate_left_();
-                    break;
-                case REMOTE_COMMAND_ROTATE_RIGHT:
-                    this->fire_rotate_right_();
-                    break;
-                case REMOTE_COMMAND_ROTATE_LEFT:
-                    this->fire_rotate_left_();
-                    break;
-                case REMOTE_COMMAND_LONG_PRESS:
-                    this->fire_long_press_();
-                    break;
-            }
-        } else {
-            ESP_LOGD(TAG, "Parity is incorrect, skipping message");
-        }
+  this->message_size_ += 1;
 
-        this->is_in_message_ = false;
-    }
+  switch (this->message_size_) {
+    case Position::ID:
+      ESP_LOGD(TAG, "Found message id: %d", incoming_byte);
+      if (this->previous_message_id_ == incoming_byte) {
+        ESP_LOGD(TAG, "This is the same as the previous message, skipping");
+        this->is_reading_message_ = false;
+      } else {
+        this->previous_message_id_ = incoming_byte;
+      }
+      break;
+    case Position::COMMAND:
+      ESP_LOGD(TAG, "Found command: %d", incoming_byte);
+      this->message_command_ = static_cast<Command>(incoming_byte);
+      break;
+    case Position::PARITY:
+      this->is_reading_message_ = false;  // Parity byte is last
+      const uint8_t parity = this->message_parity_ % 255;
+      ESP_LOGD(TAG, "Parity: got %d, have %d", incoming_byte, parity);
+      if (parity == incoming_byte) {
+        this->handle_command_();
+      } else {
+        ESP_LOGD(TAG, "Parity mismatch, skipping");
+      }
 
-    this->parity_ += read_byte;
-    this->message_size_ += 1;
+      return;
+  }
+
+  this->message_parity_ += incoming_byte;
+}
+
+void YeelightRemote::handle_command_() {
+  switch (this->message_command_) {
+    case Command::PRESS:
+      ESP_LOGD(TAG, "Triggering press");
+      this->handle_press_();
+      break;
+    case Command::LONG_PRESS:
+      ESP_LOGD(TAG, "Triggering long press");
+      this->long_press_trigger_.trigger();
+      break;
+    case Command::PRESS_AND_ROTATE_RIGHT:
+      ESP_LOGD(TAG, "Triggering press and rotate right");
+      this->press_right_trigger_.trigger();
+      break;
+    case Command::PRESS_AND_ROTATE_LEFT:
+      ESP_LOGD(TAG, "Triggering press and rotate left");
+      this->press_left_trigger_.trigger();
+      break;
+    case Command::ROTATE_RIGHT:
+      ESP_LOGD(TAG, "Triggering rotate right");
+      this->right_trigger_.trigger();
+      break;
+    case Command::ROTATE_LEFT:
+      ESP_LOGD(TAG, "Triggering rotate left");
+      this->left_trigger_.trigger();
+      break;
+  }
 }
 
 void YeelightRemote::handle_pending_press_() {
-    if (!this->press_pending_) {
-        return;
-    }
+  if (!this->is_press_pending_) {
+    return;
+  }
 
-    const uint32_t now = millis();
-    if (static_cast<uint32_t>(now - this->last_press_time_) > DOUBLE_PRESS_TIMEOUT_MS) {
-        this->press_pending_ = false;
-        this->fire_press_();
-    }
+  const uint32_t now = millis();
+  const uint32_t elapsed = now - this->last_press_time_ms_;
+  if (elapsed > DOUBLE_PRESS_TIMEOUT_MS) {
+    this->is_press_pending_ = false;
+    ESP_LOGD(TAG, "Triggering press");
+    this->press_trigger_.trigger();
+  }
 }
 
 void YeelightRemote::handle_press_() {
-    const uint32_t now = millis();
+  const uint32_t now_ms = millis();
+  const uint32_t elapsed = now_ms - this->last_press_time_ms_;
 
-    if (this->press_pending_ &&
-        static_cast<uint32_t>(now - this->last_press_time_) <= DOUBLE_PRESS_TIMEOUT_MS) {
-        this->press_pending_ = false;
-        this->fire_double_press_();
-        return;
-    }
+  if (this->is_press_pending_ &&
+      elapsed <= DOUBLE_PRESS_TIMEOUT_MS) {
+    ESP_LOGD(TAG, "Triggering double press");
+    this->is_press_pending_ = false;
+    this->double_press_trigger_.trigger();
+    return;
+  }
 
-    this->press_pending_ = true;
-    this->last_press_time_ = now;
+  this->is_press_pending_ = true;
+  this->last_press_time_ms_ = now_ms;
 
-    ESP_LOGD(TAG, "Press pending...");
+  ESP_LOGD(TAG, "Press pending...");
 }
 
-void YeelightRemote::fire_press_() {
-    ESP_LOGD(TAG, "Press");
-    this->press_trigger_->trigger();
-}
-
-void YeelightRemote::fire_double_press_() {
-    ESP_LOGD(TAG, "Double press");
-    this->double_press_trigger_->trigger();
-}
-
-void YeelightRemote::fire_long_press_() {
-    ESP_LOGD(TAG, "Long press");
-    this->long_press_trigger_->trigger();
-}
-
-void YeelightRemote::fire_rotate_left_() {
-    ESP_LOGD(TAG, "Left");
-    this->left_trigger_->trigger();
-}
-
-void YeelightRemote::fire_rotate_right_() {
-    ESP_LOGD(TAG, "Right");
-    this->right_trigger_->trigger();
-}
-
-void YeelightRemote::fire_press_and_rotate_left_() {
-    ESP_LOGD(TAG, "Press Left");
-    this->press_left_trigger_->trigger();
-}
-
-void YeelightRemote::fire_press_and_rotate_right_() {
-    ESP_LOGD(TAG, "Press Right");
-    this->press_right_trigger_->trigger();
-}
-
-} // namespace yeelight_remote
-} // namespace esphome
+}  // namespace yeelight_remote
+}  // namespace esphome
