@@ -37,13 +37,16 @@ class YeelightRemote : public Component, public uart::UARTDevice {
   Trigger<> *get_press_left_trigger() { return &this->press_left_trigger_; }
   Trigger<> *get_press_right_trigger() { return &this->press_right_trigger_; }
 
+  void set_double_press_timeout_ms(uint32_t ms) { this->double_press_timeout_ms_ = ms; }
+
  protected:
   Command message_command_{0};
   uint8_t message_parity_{0};
   uint8_t message_size_{0};
   uint8_t previous_message_id_{0};
-  uint32_t last_press_time_ms_{0};
   bool is_reading_message_{false};
+  uint32_t double_press_timeout_ms_{0};
+  uint32_t last_press_time_ms_{0};
   bool is_press_pending_{false};
 
   void handle_byte_(uint8_t incoming_byte);

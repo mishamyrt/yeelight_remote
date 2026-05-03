@@ -8,9 +8,7 @@ namespace esphome {
 namespace yeelight_remote {
 
 static const char *TAG = "yeelight-remote";
-
 static const uint8_t REMOTE_MESSAGE_START = 0x5A;
-static const uint32_t DOUBLE_PRESS_TIMEOUT_MS = 300;
 
 void YeelightRemote::dump_config() { ESP_LOGCONFIG(TAG, ""); }
 
@@ -101,7 +99,7 @@ void YeelightRemote::handle_pending_press_() {
 
   const uint32_t now = millis();
   const uint32_t elapsed = now - this->last_press_time_ms_;
-  if (elapsed > DOUBLE_PRESS_TIMEOUT_MS) {
+  if (elapsed > this->double_press_timeout_ms_) {
     this->is_press_pending_ = false;
     ESP_LOGD(TAG, "Triggering press");
     this->press_trigger_.trigger();
@@ -112,8 +110,7 @@ void YeelightRemote::handle_press_() {
   const uint32_t now_ms = millis();
   const uint32_t elapsed = now_ms - this->last_press_time_ms_;
 
-  if (this->is_press_pending_ &&
-      elapsed <= DOUBLE_PRESS_TIMEOUT_MS) {
+  if (this->is_press_pending_ && elapsed <= this->double_press_timeout_ms_) {
     ESP_LOGD(TAG, "Triggering double press");
     this->is_press_pending_ = false;
     this->double_press_trigger_.trigger();
