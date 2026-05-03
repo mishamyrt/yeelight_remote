@@ -16,6 +16,7 @@ static const uint8_t REMOTE_COMMAND_LONG_PRESS = 0x06;
 static const uint8_t REMOTE_MESSAGE_START = 0x5A;
 static const uint8_t REMOTE_POSITION_COMMAND = 3;
 static const uint8_t REMOTE_POSITION_PARITY = 7;
+static const uint32_t DOUBLE_PRESS_TIMEOUT_MS = 300;
 
 
 void YeelightRemote::dump_config() {
@@ -27,6 +28,7 @@ void YeelightRemote::loop() {
         uint8_t read_byte = this->read();
         this->handle_char_(read_byte);
     }
+    this->handle_pending_press_();
 }
 
 void YeelightRemote::handle_char_(uint8_t read_byte) {
@@ -59,24 +61,25 @@ void YeelightRemote::handle_char_(uint8_t read_byte) {
                     this->handle_press_();
                     break;
                 case REMOTE_COMMAND_PRESS_AND_ROTATE_RIGHT:
-                    this->handle_press_and_rotate_right_();
+                    this->fire_press_and_rotate_right_();
                     break;
                 case REMOTE_COMMAND_PRESS_AND_ROTATE_LEFT:
-                    this->handle_press_and_rotate_left_();
+                    this->fire_press_and_rotate_left_();
                     break;
                 case REMOTE_COMMAND_ROTATE_RIGHT:
-                    this->handle_rotate_right_();
+                    this->fire_rotate_right_();
                     break;
                 case REMOTE_COMMAND_ROTATE_LEFT:
-                    this->handle_rotate_left_();
+                    this->fire_rotate_left_();
                     break;
                 case REMOTE_COMMAND_LONG_PRESS:
-                    this->handle_long_press_();
+                    this->fire_long_press_();
                     break;
             }
         } else {
             ESP_LOGD(TAG, "Parity is incorrect, skipping message");
         }
+
         this->is_in_message_ = false;
     }
 
@@ -84,32 +87,65 @@ void YeelightRemote::handle_char_(uint8_t read_byte) {
     this->message_size_ += 1;
 }
 
+void YeelightRemote::handle_pending_press_() {
+    if (!this->press_pending_) {
+        return;
+    }
+
+    const uint32_t now = millis();
+    if (static_cast<uint32_t>(now - this->last_press_time_) > DOUBLE_PRESS_TIMEOUT_MS) {
+        this->press_pending_ = false;
+        this->fire_press_();
+    }
+}
+
 void YeelightRemote::handle_press_() {
+    const uint32_t now = millis();
+
+    if (this->press_pending_ &&
+        static_cast<uint32_t>(now - this->last_press_time_) <= DOUBLE_PRESS_TIMEOUT_MS) {
+        this->press_pending_ = false;
+        this->fire_double_press_();
+        return;
+    }
+
+    this->press_pending_ = true;
+    this->last_press_time_ = now;
+
+    ESP_LOGD(TAG, "Press pending...");
+}
+
+void YeelightRemote::fire_press_() {
     ESP_LOGD(TAG, "Press");
     this->press_trigger_->trigger();
 }
 
-void YeelightRemote::handle_long_press_() {
+void YeelightRemote::fire_double_press_() {
+    ESP_LOGD(TAG, "Double press");
+    this->double_press_trigger_->trigger();
+}
+
+void YeelightRemote::fire_long_press_() {
     ESP_LOGD(TAG, "Long press");
     this->long_press_trigger_->trigger();
 }
 
-void YeelightRemote::handle_rotate_left_() {
+void YeelightRemote::fire_rotate_left_() {
     ESP_LOGD(TAG, "Left");
     this->left_trigger_->trigger();
 }
 
-void YeelightRemote::handle_rotate_right_() {
+void YeelightRemote::fire_rotate_right_() {
     ESP_LOGD(TAG, "Right");
     this->right_trigger_->trigger();
 }
 
-void YeelightRemote::handle_press_and_rotate_left_() {
+void YeelightRemote::fire_press_and_rotate_left_() {
     ESP_LOGD(TAG, "Press Left");
     this->press_left_trigger_->trigger();
 }
 
-void YeelightRemote::handle_press_and_rotate_right_() {
+void YeelightRemote::fire_press_and_rotate_right_() {
     ESP_LOGD(TAG, "Press Right");
     this->press_right_trigger_->trigger();
 }

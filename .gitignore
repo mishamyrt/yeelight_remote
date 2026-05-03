@@ -30,3 +30,7 @@
 *.exe
 *.out
 *.app
+
+.esphome
+__pycache__
+testdata/secrets.yaml
