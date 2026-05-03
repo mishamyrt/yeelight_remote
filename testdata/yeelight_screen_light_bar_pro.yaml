@@ -1,0 +1,167 @@
+esphome:
+  name: "yeelight_screen_light_bar_pro"
+  friendly_name: "Yeelight Screen Light Bar Pro"
+
+esp8266:
+  board: "esp01_1m"
+
+# logger:
+#   level: DEBUG
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  fast_connect: true
+
+captive_portal:
+api:
+ota:
+  platform: "esphome"
+
+external_components:
+  - source:
+      type: "local"
+      path: ../components
+    components: [yeelight_remote]
+#   - source:
+#       type: "git"
+#       url: "https://github.com/mishamyrt/yeelight_remote"
+#     components: [yeelight_remote]
+
+sensor:
+  - platform: "wifi_signal"
+    name: "Signal"
+    update_interval: 60s
+
+output:
+  - platform: "esp8266_pwm"
+    pin: "GPIO12"
+    id: "output_cw"
+    power_supply: "power"
+    min_power: 0.05
+    max_power: 0.95
+    zero_means_zero: true
+
+  - platform: "esp8266_pwm"
+    pin: "GPIO5"
+    id: "output_ww"
+    power_supply: "power"
+    min_power: 0.05
+    max_power: 0.95
+    zero_means_zero: true
+
+power_supply:
+  - id: "power"
+    pin: "GPIO4"
+    enable_time: 0s
+    keep_on_time: 0s
+
+light:
+  - name: "Main"
+    id: "front"
+    platform: "cwww"
+    default_transition_length: 0.5s
+    constant_brightness: true
+    gamma_correct: 2.8
+    cold_white: "output_cw"
+    warm_white: "output_ww"
+    cold_white_color_temperature: 6500 K
+    warm_white_color_temperature: 2700 K
+    icon: "mdi:light-flood-down"
+  - name: "Ambient"
+    platform: "neopixelbus"
+    id: "ambient"
+    num_leds: 40
+    pin: "GPIO3"
+    type: "GRB"
+    variant: "WS2812X"
+    power_supply: "power"
+    color_correct: [70%, 70%, 70%]
+    icon: "mdi:led-strip"
+    effects:
+      - addressable_rainbow:
+          name: "Rainbow"
+          speed: 5
+          width: 80
+      - addressable_twinkle:
+          name: "Twinkle"
+          twinkle_probability: 5%
+          progress_interval: 4ms
+
+event:
+  - platform: "template"
+    id: "remote_buttons"
+    name: "Yeelight Remote"
+    device_class: "button"
+    event_types:
+      - "long_press"
+      - "double_press"
+
+uart:
+  - id: "remote_bus"
+    baud_rate: 4800
+    rx_pin: "GPIO2"
+
+yeelight_remote:
+  on_press:
+    - if:
+        condition:
+          lambda: "return id(front).current_values.is_on();"
+        then:
+          - light.turn_off:
+              id: "front"
+              transition_length: 1s
+        else:
+          - light.turn_on:
+              id: "front"
+              transition_length: 1s
+  on_left:
+    then:
+      - light.dim_relative:
+          id: "front"
+          relative_brightness: -0.05
+          transition_length: 0.2s
+  on_right:
+    then:
+      - light.dim_relative:
+          id: "front"
+          relative_brightness: 0.05
+          transition_length: 0.2s
+          brightness_limits:
+            min_brightness: 5%
+  on_long_press:
+    - event.trigger:
+        id: remote_buttons
+        event_type: long_press
+  on_double_press:
+    - event.trigger:
+        id: remote_buttons
+        event_type: double_press
+  on_press_left:
+    - lambda: |-
+        float temp_delta = 40.0f;
+        float current_temp = id(front).current_values.get_color_temperature();
+        if (current_temp == 0.0f) {
+          current_temp = 370.0f; // mireds ~2700K
+        }
+        float new_temp = current_temp + 20.0f;
+        if (new_temp > 370.0f) {
+          new_temp = 370.0f;
+        }
+        auto call = id(front).make_call();
+        call.set_color_temperature(new_temp);
+        call.perform();
+  on_press_right:
+    - lambda: |-
+        float temp_delta = 40.0f;
+        float current_temp = id(front).current_values.get_color_temperature();
+        if (current_temp == 0.0f) {
+          current_temp = 154.0f;  // mireds ~6500K
+        }
+        float new_temp = current_temp - temp_delta;  // сдвиг в сторону «холоднее»
+        if (new_temp < 154.0f) {
+          new_temp = 154.0f;
+        }
+        auto call = id(front).make_call();
+        call.set_color_temperature(new_temp);
+        call.perform();
